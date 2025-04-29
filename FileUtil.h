@@ -1,7 +1,7 @@
 #ifndef __FILEUTIL__
 #define __FILEUTIL__
 #include "linuxheader.h"
-#include <openssl/sha.h> // sudo apt install libssl-dev
+#include <openssl/sha.h> 
 #include <string>
 class FileUtil{
 public:
@@ -21,7 +21,7 @@ public:
         }
         // 最后再final
         unsigned char md[20];//这不是一个可打印字符 40个16进制数组成
-        SHA1_Final(md,&sha_ctx);
+        SHA1_Final(md,&sha_ctx);    
         std::string sha1Res;
         char frag[3]; //{'1' 'a' '\0'}
         for(int i = 0; i < 20; ++i){

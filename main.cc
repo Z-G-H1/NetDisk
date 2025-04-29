@@ -26,6 +26,7 @@ int main(){
         auto userInfo = req->query_list();
         std::string username = userInfo["username"];
         //  读取文件内容 解析form-data类型的请求报文
+        // 键是file，值是文件名和文件内容
         using Form = std::map<std::string, std::pair<std::string, std::string>>;
         Form &form = req->form();
         std::pair<std::string, std::string> fileInfo = form["file"];
@@ -36,10 +37,12 @@ int main(){
             resp->set_status_code("500");
             return;
         }
-        // try {} catch () 
+        // 处理报错的两种风格，
+        // 一种是使用返回值，如上if语句
+        // 一种是 try {} catch ()
+         
         // 方案 1 write
         int ret = write(fd,fileInfo.second.c_str(),fileInfo.second.size());
-
         close(fd);
         
         /* 方案 2 pwrite的任务
@@ -73,9 +76,10 @@ int main(){
         auto fileInfo = req->query_list();
         std::string filesha1 = fileInfo["filehash"];
         std::string filename = fileInfo["filename"];
-        int filesize = std::stoi(fileInfo["filesize"]);
+        // int filesize = std::stoi(fileInfo["filesize"]);
         std::string filepath = "tmp/"+filename;
 
+        // 下面这种方式也能实现下载功能，但当用户量较大的时候就抗不住了
         // int fd = open(filepath.c_str(),O_RDONLY);
         // int size = lseek(fd,0,SEEK_END);
         // lseek(fd,0,SEEK_SET);
@@ -85,6 +89,8 @@ int main(){
         // resp->append_output_body(buf.get(),size);
         // resp->headers["Content-Type"] = "application/octect-stream";
         // resp->headers["content-disposition"] = "attachment;filename="+filename;
+   
+        // 转发到静态资源服务器来处理下载任务
         resp->set_status_code("302");
         resp->headers["Location"] = "http://192.168.137.138:1235/"+filename;
     });
@@ -106,7 +112,7 @@ int main(){
         std::string sql = "INSERT INTO test1.tbl_user (user_name,user_pwd) values ('" + username + "','" + encryptPassword + "');";
         // fprintf(stderr, sql.c_str());
             //create mysql task
-       auto mysqlTask = WFTaskFactory::create_mysql_task("mysql://root:root@localhost",0,[](WFMySQLTask* mysqlTask){
+        auto mysqlTask = WFTaskFactory::create_mysql_task("mysql://root:root@localhost",0,[](WFMySQLTask* mysqlTask){
             //4 回复success 给用户
             // 检查连接错误
             wfrest::HttpResp *resp2client = static_cast<wfrest::HttpResp *>(mysqlTask->user_data);
@@ -146,7 +152,6 @@ int main(){
         mysqlTask->user_data = resp;
 
         series->push_back(mysqlTask);
-
     });
 
     server.GET("/static/view/signin.html",[](const wfrest::HttpReq *req, wfrest::HttpResp *resp){
@@ -203,7 +208,7 @@ int main(){
             // 存入数据库当中
             std::string url = "mysql://root:root@localhost";
             std::string sql = "REPLACE INTO test1.tbl_user_token (user_name,user_token) VALUES ('" 
-                + userInfo->username 
+                + userInfo->username
                 + "', '" + usertoken.token + "');";
             auto writeTask = WFTaskFactory::create_mysql_task(url,0,[](WFMySQLTask *writeTask){
                 UserInfo *userinfo = static_cast<UserInfo *>(series_of(writeTask)->get_context());
@@ -216,6 +221,7 @@ int main(){
                 respInfo["msg"] = "OK";
                 respInfo["data"] = uinfo;
                 userinfo->resp->String(respInfo.dump());
+                // 将信息传递给前端，前端负责跳转逻辑，"/static/view/home.html";
             });
             writeTask->get_req()->set_query(sql);
             series_of(readTask)->push_back(writeTask);
@@ -272,6 +278,7 @@ int main(){
         auto form_kv = req->form_kv();
         std::string limit = form_kv["limit"];
         // 根据用户名查tbl_user_file
+        // 查询这个用户上传过哪些文件
         std::string sql = "SELECT file_sha1,file_name,file_size,upload_at,last_update FROM test1.tbl_user_file WHERE user_name = '"
                         + username + "' LIMIT " + limit + ";";
         //fprintf(stderr,"sql = %s\n", sql.c_str());
