@@ -8,7 +8,12 @@
 #include "Token.h"
 #include <wfrest/Json.h>
 #include <nlohmann/json.hpp>
+#include "OSS/OSS.h"
+#include "rabbitmq.h"
+#include <SimpleAmqpClient/SimpleAmqpClient.h>
 static WFFacilities::WaitGroup waitGroup(1);
+
+using namespace AlibabaCloud::OSS;
 using Json = nlohmann::json;
 void sigHandler(int num){
     waitGroup.done();
@@ -17,11 +22,13 @@ void sigHandler(int num){
 
 int main(){
     signal(SIGINT,sigHandler);
+    InitializeSdk();
+    Config config;
     wfrest::HttpServer server;
     server.GET("/file/upload",[](const wfrest::HttpReq *req, wfrest::HttpResp *resp){
         resp->File("static/view/index.html");
     });
-    server.POST("/file/upload",[](const wfrest::HttpReq *req, wfrest::HttpResp *resp){
+    server.POST("/file/upload",[config](const wfrest::HttpReq *req, wfrest::HttpResp *resp){
         // 从URL中提取用户名的信息
         auto userInfo = req->query_list();
         std::string username = userInfo["username"];
@@ -65,6 +72,33 @@ int main(){
             fprintf(stderr,"out = %s\n", pjson->dump().c_str());
         });
         // fprintf(stderr,"sql = %s\n", sql.c_str());
+
+        if(config.storeType == OSS){
+            OSSInfo info;
+            ClientConfiguration conf;
+            OssClient client(info.Endpoint,info.AccessKeyId,info.AccessKeySecret, conf);
+            std::string osspath = "disk/"+ FileUtil::sha1File(filepath.c_str());
+            if(config.isAsyncTransferEnable == false){
+                auto outcome = client.PutObject(info.Bucket,osspath,filepath);//把本地的filepath存入OSS的osspath
+                if(!outcome.isSuccess()){
+                    fprintf(stderr,"PutObject fail, code = %s, message = %s, request id = %s\n", outcome.error().Code().c_str()
+                    ,outcome.error().Message().c_str()
+                    ,outcome.error().RequestId().c_str());
+                }
+            }
+            else{// 开启异步转移，转移到消息队列当中
+                RabbitMqInfo mqInfo;
+                AmqpClient::Channel::ptr_t channel = AmqpClient::Channel::Create();
+                Json transInfo;
+                transInfo["filehash"] = FileUtil::sha1File(filepath.c_str());
+                transInfo["filepath"] = filepath;
+                transInfo["osspath"] = osspath;
+                // 把json发送到消息队列当中
+                AmqpClient::BasicMessage::ptr_t message = AmqpClient::BasicMessage::Create(transInfo.dump());
+                channel->BasicPublish(mqInfo.TransExchangeName,mqInfo.TransRoutingKey,message);
+            }
+        }
+
         resp->set_status_code("302");
         resp->headers["Location"] = "/file/upload/success";
     });
