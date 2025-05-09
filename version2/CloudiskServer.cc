@@ -1,4 +1,7 @@
 #include "CloudiskServer.h"
+#include <cstdio>
+#include <nlohmann/json.hpp>
+#include <wfrest/Json.h>
 #include <string>
 #include <utility>
 #include <wfrest/HttpFile.h>
@@ -8,6 +11,8 @@
 #include <workflow/WFTask.h>
 #include <workflow/WFTaskFactory.h>
 #include "Hash.h"
+#include "Token.h"
+using Json = nlohmann::json;
 
 using namespace wfrest;
 
@@ -84,9 +89,69 @@ void CloudiskServer::loadUserRegisterModule(){
 }
 
 void CloudiskServer::loadUserLoginModule(){
+    _httpServer.POST("/user/signin",[](const HttpReq* req, HttpResp* resp, SeriesWork * series){
+                // 1 解析用户请求
+        std::map<std::string,std::string> &form_kv = req->form_kv();
+            std::string username = form_kv["username"];
+            std::string password = form_kv["password"];
+            // 2 查询数据库
+            std::string url = "mysql://root:root@localhost";
+            std::string sql = "SELECT user_pwd FROM test1.tbl_user WHERE user_name = '" + username + "'LIMIT 1;";
+            string salt("12345678");//这里应该是随机生成
+            string encodedPassword(crypt(password.c_str(), salt.c_str()));
+            auto readTask = WFTaskFactory::create_mysql_task(url,0,[=](WFMySQLTask* readTask){
+                //提取readtask的结果
+            auto *mysqlResp = readTask->get_resp();
+            protocol::MySQLResultCursor cursor(mysqlResp);
+            std::vector<std::vector<protocol::MySQLCell>> rows;
+            cursor.fetch_all(rows);
+
+            std::string nowPassword = rows[0][0].as_string();
+            // fprintf(stderr, "nowPassword: %s\n", nowPassword.c_str());
+
+            // 3 解密
+            std::string salt = "12345678";
+            char *encryptPassword = crypt(password.c_str(), salt.c_str());
+            // fprintf(stderr, "encryptPassword: %s\n", encryptPassword);
+            if(strcmp(nowPassword.c_str(),encryptPassword) != 0){
+                // userInfo
+                resp->append_output_body("Fail",4);
+                return;
+            }
+            // 3 没有问题就生成一个token 存入数据库
+            //根据登录时间和用户名（容易伪造，使用加密避免伪造）
+            //根据用户信息
+            Token usertoken(username,"12345678");
+            //fprintf(stderr,"token = %s\n",usertoken.token.c_str());
+            std::string tokenStr = usertoken.genToken();
+            
+
+            // 存入数据库当中
+            std::string url = "mysql://root:root@localhost";
+            std::string sql = "REPLACE INTO test1.tbl_user_token (user_name,user_token) VALUES ('" 
+                + username
+                + "', '" + tokenStr + "');";
+            auto writeTask = WFTaskFactory::create_mysql_task(url,0,[=](WFMySQLTask *writeTask){
+                ::Json msg;
+                ::Json data;
+                data["Token"] = tokenStr;
+                data["Username"] = username;
+                data["Location"] = "/static/view/home.html";//跳转到用户中心页面
+                msg["data"] = data;
+                resp->String(msg.dump());//序列化之后，发送给客户端
+            });
+            writeTask->get_req()->set_query(sql);
+            series_of(readTask)->push_back(writeTask);
+            // 4 将信息包装成json 返回客户端
+            });
+            readTask->get_req()->set_query(sql);
+            series->push_back(readTask);    
+        
+    });
+
+
 
 }
-
 
 
 void CloudiskServer::loadStaticResourceModule(){
