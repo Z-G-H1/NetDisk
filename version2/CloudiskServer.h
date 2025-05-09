@@ -18,8 +18,12 @@ public:
 
 private:
     void loadStaticResourceModule();
+    void loadUserRegisterModule();
+    void loadUserLoginModule();
+    void loadFileQueryModule();
 
 private:
+
     WFFacilities::WaitGroup _waitGroup;
     wfrest::HttpServer _httpServer;
 
